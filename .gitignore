@@ -1,0 +1,19 @@
+# compiled binaries
+worker/worker
+/worker/cmd/worker/worker
+
+# test media
+*.mp4
+*.mkv
+*.mov
+*.webm
+
+# secrets / local env
+.env
+*.tfvars
+*.pem
+
+# terraform (phase 2)
+.terraform/
+*.tfstate
+*.tfstate.*

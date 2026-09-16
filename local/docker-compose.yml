@@ -1,0 +1,9 @@
+services:
+  postgres:
+    image : postgres:16
+    environment:
+      - POSTGRES_PASSWORD=hello123
+      - POSTGRES_DB=media_pipeline
+    ports:
+          - 5432:5432
+  
