@@ -8,9 +8,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/google/uuid"
 
 	"github.com/Naved124/media-pipeline-worker/internal/queue"
 	"github.com/Naved124/media-pipeline-worker/internal/storage"
+	"github.com/Naved124/media-pipeline-worker/internal/transcode"
 )
 
 func main() {
@@ -46,11 +48,13 @@ func main() {
 		if !found {
 			continue
 		}
+		jobID := uuid.New().String()
 		localPath, err := storageClient.Download(msg.ObjectKey)
 		if err != nil {
 			log.Printf("failed to download %s: %v", msg.ObjectKey, err)
 			continue
 		}
 		log.Printf("path of the file: %s", localPath)
+
 	}
 }
