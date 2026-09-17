@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -55,6 +56,22 @@ func main() {
 			continue
 		}
 		log.Printf("path of the file: %s", localPath)
+
+		files, err := transcode.Transcode(localPath)
+		if err != nil {
+			log.Printf("files not fetched: %s, %v", jobID, err)
+			continue
+		}
+		for _, n := range files {
+			log.Printf("filepath is : %s , resolution is : %s", n.FilePath, n.Resolution)
+			key := fmt.Sprintf("%s/%s.mp4", jobID, n.Resolution)
+
+			err := storageClient.Upload(n.FilePath, key)
+			if err != nil {
+				log.Printf("this job failed : %s, %v", jobID, err)
+			}
+
+		}
 
 	}
 }
