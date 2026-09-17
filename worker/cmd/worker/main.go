@@ -80,6 +80,7 @@ func (w *worker) processJob(msg queue.Message) error {
 	if err != nil {
 		return fmt.Errorf("files not fetched: %s, %w", jobID, err)
 	}
+
 	for _, n := range files {
 		log.Printf("filepath is : %s , resolution is : %s", n.FilePath, n.Resolution)
 		key := fmt.Sprintf("%s/%s.mp4", jobID, n.Resolution)
