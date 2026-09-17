@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -23,7 +26,9 @@ type worker struct {
 
 func main() {
 	// Our setup : create a SQS client
-	cfg, err := config.LoadDefaultConfig(context.Background())
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Fatalf("failed to load AWS config: %v", err)
 	}
@@ -51,7 +56,11 @@ func main() {
 		// 		if message exists:
 		// 				process it (fetch > transcode > upload > write statue > delete message)
 		// 		(if no message, loop just continues)
-		msg, found, err := queueClient.Receive()
+		if ctx.Err() != nil {
+			log.Println("the worker is shutting down")
+			break
+		}
+		msg, found, err := queueClient.Receive(ctx)
 		if err != nil {
 			log.Printf("error recieveing message: %v", err)
 			continue
@@ -60,17 +69,20 @@ func main() {
 			continue
 		}
 
-		if err := w.processJob(msg); err != nil {
-			log.Printf("job fialed : %v", err)
+		jobCtx, jobCancel := context.WithTimeout(context.Background(), 5*time.Minute+30*time.Second)
+
+		err = w.processJob(jobCtx, msg)
+		jobCancel()
+		if err != nil {
+			log.Printf("job failed: %v", err)
 			continue
 		}
-
 	}
 }
 
-func (w *worker) processJob(msg queue.Message) error {
+func (w *worker) processJob(ctx context.Context, msg queue.Message) error {
 	jobID := uuid.New().String()
-	localPath, err := w.StorageClient.Download(msg.ObjectKey)
+	localPath, err := w.StorageClient.Download(ctx, msg.ObjectKey)
 	if err != nil {
 		return fmt.Errorf("failed to download %s: %w", msg.ObjectKey, err)
 	}
@@ -85,7 +97,7 @@ func (w *worker) processJob(msg queue.Message) error {
 		log.Printf("filepath is : %s , resolution is : %s", n.FilePath, n.Resolution)
 		key := fmt.Sprintf("%s/%s.mp4", jobID, n.Resolution)
 
-		err := w.StorageClient.Upload(n.FilePath, key)
+		err := w.StorageClient.Upload(ctx, n.FilePath, key)
 		if err != nil {
 			return fmt.Errorf("this job failed : %s, %s, %w", jobID, key, err)
 		}

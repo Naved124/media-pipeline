@@ -25,8 +25,8 @@ func NewClient(s3Client *s3.Client, inputBucket string, outputBucket string) *Cl
 	}
 }
 
-func (c *Client) Download(objectKey string) (string, error) {
-	result, err := c.S3Client.GetObject(context.Background(), &s3.GetObjectInput{
+func (c *Client) Download(ctx context.Context, objectKey string) (string, error) {
+	result, err := c.S3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.InputBucket),
 		Key:    aws.String(objectKey),
 	})
@@ -50,14 +50,14 @@ func (c *Client) Download(objectKey string) (string, error) {
 	return localPath, nil
 }
 
-func (c *Client) Upload(localPath string, key string) error {
+func (c *Client) Upload(ctx context.Context, localPath string, key string) error {
 	file, err := os.Open(localPath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	_, err = c.S3Client.PutObject(context.Background(), &s3.PutObjectInput{
+	_, err = c.S3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(c.OutputBucket),
 		Key:    aws.String(key),
 		Body:   file,

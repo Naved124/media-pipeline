@@ -44,8 +44,8 @@ func NewClient(sqsClient *sqs.Client, queueURL string) *Client {
 	}
 }
 
-func (c *Client) Receive() (Message, bool, error) {
-	result, err := c.SQSClient.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{
+func (c *Client) Receive(ctx context.Context) (Message, bool, error) {
+	result, err := c.SQSClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            aws.String(c.QueueURL),
 		MaxNumberOfMessages: 1,
 		WaitTimeSeconds:     20,
