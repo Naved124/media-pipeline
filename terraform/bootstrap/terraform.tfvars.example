@@ -1,0 +1,2 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+state_bucket_name = "<unique-prefix>-media-pipeline-tfstate"

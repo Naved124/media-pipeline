@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+input_bucket_name  = "<unique-prefix>-media-pipeline-input"
+output_bucket_name = "<unique-prefix>-media-pipeline-output"
+
+# Throwaway environments only: let `terraform destroy` remove everything.
+# db_deletion_protection = false
+# db_skip_final_snapshot = true
+# force_destroy_buckets  = true
