@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -13,7 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Naved124/media-pipeline-worker/internal/db"
 	"github.com/Naved124/media-pipeline-worker/internal/queue"
@@ -27,12 +28,75 @@ type worker struct {
 	DBClient      *db.Client
 }
 
-// failWriteTimeout bounds the failed-status write, which runs on a context
-// detached from the (possibly already expired) job context.
-const failWriteTimeout = 10 * time.Second
+const (
+	// jobTimeout must stay below the queue's visibility timeout (360s in
+	// terraform/pipeline), or a slow job is redelivered while still running.
+	jobTimeout = 5*time.Minute + 30*time.Second
+
+	// failWriteTimeout bounds the failed-status write, which runs on a context
+	// detached from the (possibly already expired) job context.
+	failWriteTimeout = 10 * time.Second
+
+	defaultMaxInputBytes = 2 << 30 // 2 GiB
+)
+
+// settings is everything the worker reads from its environment.
+type settings struct {
+	QueueURL      string
+	InputBucket   string
+	OutputBucket  string
+	DatabaseURL   string
+	MaxInputBytes int64
+}
+
+// loadSettings validates the environment up front, so a misconfigured pod
+// fails at start rather than on its first message.
+func loadSettings() (settings, error) {
+	s := settings{
+		QueueURL:      os.Getenv("QUEUE_URL"),
+		InputBucket:   os.Getenv("INPUT_BUCKET"),
+		OutputBucket:  os.Getenv("OUTPUT_BUCKET"),
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
+		MaxInputBytes: defaultMaxInputBytes,
+	}
+
+	var missing []string
+	for _, v := range []struct{ name, value string }{
+		{"QUEUE_URL", s.QueueURL},
+		{"INPUT_BUCKET", s.InputBucket},
+		{"OUTPUT_BUCKET", s.OutputBucket},
+		{"DATABASE_URL", s.DatabaseURL},
+	} {
+		if v.value == "" {
+			missing = append(missing, v.name)
+		}
+	}
+	if len(missing) > 0 {
+		return s, fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
+	}
+
+	// the separation is what stops renditions retriggering the worker
+	if s.InputBucket == s.OutputBucket {
+		return s, fmt.Errorf("INPUT_BUCKET and OUTPUT_BUCKET must be different buckets")
+	}
+
+	if raw := os.Getenv("MAX_INPUT_BYTES"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || n <= 0 {
+			return s, fmt.Errorf("MAX_INPUT_BYTES must be a positive integer, got %q", raw)
+		}
+		s.MaxInputBytes = n
+	}
+	return s, nil
+}
 
 func main() {
 	// Our setup : create a SQS client
+	env, err := loadSettings()
+	if err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	cfg, err := config.LoadDefaultConfig(ctx)
@@ -41,26 +105,20 @@ func main() {
 	}
 
 	sqsClient := sqs.NewFromConfig(cfg)
-	queueURL := os.Getenv("QUEUE_URL")
 
-	queueClient := queue.NewClient(sqsClient, queueURL)
+	queueClient := queue.NewClient(sqsClient, env.QueueURL)
 
 	//create a s3 client
 	s3Client := s3.NewFromConfig(cfg)
-	inputBucket := os.Getenv("INPUT_BUCKET")
-	outputBucket := os.Getenv("OUTPUT_BUCKET")
 
-	storageClient := storage.NewClient(s3Client, inputBucket, outputBucket)
+	storageClient := storage.NewClient(s3Client, env.InputBucket, env.OutputBucket, env.MaxInputBytes)
 
 	// create the postgres pool, once, and check it is reachable before polling
-	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	pool, err := db.Connect(ctx, env.DatabaseURL)
 	if err != nil {
-		log.Fatalf("failed to create database pool: %v", err)
+		log.Fatalf("database: %v", err)
 	}
 	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("failed to reach database: %v", err)
-	}
 	dbClient := db.NewClient(pool)
 
 	w := &worker{
@@ -88,7 +146,7 @@ func main() {
 			continue
 		}
 
-		jobCtx, jobCancel := context.WithTimeout(context.Background(), 5*time.Minute+30*time.Second)
+		jobCtx, jobCancel := context.WithTimeout(context.Background(), jobTimeout)
 
 		err = w.processJob(jobCtx, msg)
 		jobCancel()
@@ -100,6 +158,12 @@ func main() {
 }
 
 func (w *worker) processJob(ctx context.Context, msg queue.Message) error {
+	// Download always reads the configured input bucket, so an event naming
+	// any other bucket would process the wrong object; leave it for the DLQ
+	if msg.Bucket != w.StorageClient.InputBucket {
+		return fmt.Errorf("event for bucket %q, expected %q", msg.Bucket, w.StorageClient.InputBucket)
+	}
+
 	jobID := uuid.New().String()
 
 	// the row is written on receipt, so a pod killed mid-job leaves a
@@ -133,11 +197,23 @@ func (w *worker) processJob(ctx context.Context, msg queue.Message) error {
 }
 
 func (w *worker) transcodeAndUpload(ctx context.Context, jobID string, objectKey string) ([]db.Output, error) {
-	localPath, err := w.StorageClient.Download(ctx, objectKey)
+	// one private (0700) directory per job, removed when the job ends however
+	// it ends, so files can't collide across jobs or accumulate on the node
+	jobDir, err := os.MkdirTemp("", "job-"+jobID+"-")
 	if err != nil {
-		return nil, fmt.Errorf("failed to download %s: %w", objectKey, err)
+		return nil, fmt.Errorf("creating work directory for job %s: %w", jobID, err)
 	}
-	log.Printf("path of the file: %s", localPath)
+	defer func() {
+		if err := os.RemoveAll(jobDir); err != nil {
+			log.Printf("job %s: removing work directory: %v", jobID, err)
+		}
+	}()
+
+	localPath, err := w.StorageClient.Download(ctx, objectKey, jobDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download %q: %w", objectKey, err)
+	}
+	log.Printf("job %s: downloaded %q to %s", jobID, objectKey, localPath)
 
 	files, err := transcode.Transcode(ctx, localPath)
 	if err != nil {
