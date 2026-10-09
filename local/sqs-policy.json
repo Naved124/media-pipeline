@@ -5,9 +5,10 @@
       "Effect": "Allow",
       "Principal": { "Service": "s3.amazonaws.com" },
       "Action": "sqs:SendMessage",
-      "Resource": "arn:aws:sqs:ap-south-1:598391748572:media-pipeline-test-queue",
+      "Resource": "arn:aws:sqs:ap-south-1:<ACCOUNT_ID>:<QUEUE_NAME>",
       "Condition": {
-        "ArnEquals": { "aws:SourceArn": "arn:aws:s3:::naved-media-pipeline-testing-1" }
+        "ArnEquals": { "aws:SourceArn": "arn:aws:s3:::<INPUT_BUCKET>" },
+        "StringEquals": { "aws:SourceAccount": "<ACCOUNT_ID>" }
       }
     }
   ]

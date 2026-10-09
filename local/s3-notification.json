@@ -1,7 +1,7 @@
 {
   "QueueConfigurations": [
     {
-      "QueueArn": "arn:aws:sqs:ap-south-1:598391748572:media-pipeline-test-queue",
+      "QueueArn": "arn:aws:sqs:ap-south-1:<ACCOUNT_ID>:<QUEUE_NAME>",
       "Events": ["s3:ObjectCreated:*"]
     }
   ]
