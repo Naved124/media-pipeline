@@ -2,8 +2,10 @@
 package transcode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -64,6 +66,12 @@ func probe(ctx context.Context, localPath string) (source, error) {
 	cmd.WaitDelay = waitDelay
 	out, err := cmd.Output()
 	if err != nil {
+		// Output keeps stderr on the ExitError; without it the stored reason
+		// is just "exit status 1"
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return source{}, fmt.Errorf("ffprobe results: %w, %s", err, bytes.TrimSpace(exitErr.Stderr))
+		}
 		return source{}, fmt.Errorf("ffprobe results: %w", err)
 	}
 
