@@ -68,3 +68,13 @@ func (c *Client) Receive(ctx context.Context) (Message, bool, error) {
 	}
 	return msg, true, nil
 }
+
+// Delete removes one delivery from the queue. Until it is called, the message
+// becomes visible again when its visibility timeout expires.
+func (c *Client) Delete(ctx context.Context, receiptHandle string) error {
+	_, err := c.SQSClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+		QueueUrl:      aws.String(c.QueueURL),
+		ReceiptHandle: aws.String(receiptHandle),
+	})
+	return err
+}
