@@ -21,5 +21,7 @@ COPY --from=build /out/worker /usr/local/bin/worker
 # numeric UID so Kubernetes runAsNonRoot can verify it without /etc/passwd
 USER 10001:10001
 
-# A queue worker has no endpoint to probe; liveness is Kubernetes' job (phase 4).
+# A queue worker has no endpoint to probe, and Kubernetes ignores Docker
+# HEALTHCHECK anyway; liveness is configured on the Deployment in phase 4.
+#checkov:skip=CKV_DOCKER_2:No endpoint to probe; Kubernetes probes replace HEALTHCHECK.
 ENTRYPOINT ["/usr/local/bin/worker"]
