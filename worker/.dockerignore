@@ -1,0 +1,8 @@
+# only go.mod, go.sum and Go source belong in the build context
+worker
+cmd/worker/worker
+*.mp4
+*.mkv
+*.mov
+*.webm
+.env
