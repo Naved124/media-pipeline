@@ -139,7 +139,7 @@ func (w *worker) transcodeAndUpload(ctx context.Context, jobID string, objectKey
 	}
 	log.Printf("path of the file: %s", localPath)
 
-	files, err := transcode.Transcode(localPath)
+	files, err := transcode.Transcode(ctx, localPath)
 	if err != nil {
 		return nil, fmt.Errorf("files not fetched: %s, %w", jobID, err)
 	}
